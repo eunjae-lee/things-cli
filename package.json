@@ -4,6 +4,7 @@
   "description": "Command-line interface for Things 3 task management app",
   "main": "index.js",
   "type": "module",
+  "private": false,
   "bin": {
     "things": "./index.js"
   },
