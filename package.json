@@ -1,0 +1,34 @@
+{
+  "name": "@eunjae-lee/things-cli",
+  "version": "1.0.0",
+  "description": "Command-line interface for Things 3 task management app",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "things": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "things",
+    "tasks",
+    "productivity",
+    "cli",
+    "applescript",
+    "macos"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin"
+  ],
+  "dependencies": {
+    "chalk": "^5.5.0",
+    "commander": "^14.0.0",
+    "node-osascript": "^2.1.0"
+  }
+}
