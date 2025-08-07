@@ -10,19 +10,13 @@ A command-line interface for Things 3 task management app on macOS. This CLI wra
 
 ## Installation
 
-1. Clone or download this repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Make the CLI executable:
-   ```bash
-   chmod +x index.js
-   ```
-4. (Optional) Create a symlink for global access:
-   ```bash
-   ln -s $(pwd)/index.js /usr/local/bin/things
-   ```
+Install globally from npm:
+
+```bash
+npm install -g @eunjae/things-cli
+```
+
+That's it! The `things` command will be available globally.
 
 ## Usage
 

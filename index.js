@@ -3,19 +3,27 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { executeAppleScript } from './lib/applescript.js';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const packageJson = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'));
 
 const program = new Command();
 
 program
   .name('things')
   .description('CLI for Things 3 task management')
-  .version('1.0.0');
+  .version(packageJson.version)
+  .showHelpAfterError();
 
 // To-do commands
-program
+const addCommand = program
   .command('add <title>')
   .usage('<title> [options]')
-  .description('Add a new to-do\n\nExamples:\n  things add "Buy groceries"\n  things add "Call dentist" --notes "Schedule cleaning" --due 2024-01-15\n  things add "Review code" --list Today --tags "Work,Urgent"\n  things add "Book flights" --project-id "A1B2C3D4E5F6G7H8I9J0K1L2"')
+  .description('Add a new to-do')
   .option('-n, --notes <notes>', 'Add notes to the to-do')
   .option('-d, --due <date>', 'Set due date (YYYY-MM-DD)')
   .option('-t, --tags <tags>', 'Add tags (comma-separated)')
@@ -33,10 +41,17 @@ program
     }
   });
 
-program
+addCommand.addHelpText('after', `
+Examples:
+  things add "Buy groceries"
+  things add "Call dentist" --notes "Schedule cleaning" --due 2024-01-15
+  things add "Review code" --list Today --tags "Work,Urgent"
+  things add "Book flights" --project-id "A1B2C3D4E5F6G7H8I9J0K1L2"`);
+
+const listCommand = program
   .command('list [container]')
   .usage('[container] [options]')
-  .description('List to-dos from a container\n\nExamples:\n  things list                    # List from Inbox\n  things list Today              # List from Today\n  things list "My Project"       # List from project\n  things list Today --ids        # Show IDs for completion\n  things list A1B2C3D4E5F6G7H8   # List by project/area ID')
+  .description('List to-dos from a container')
   .option('--ids', 'Show IDs for each to-do')
   .action(async (container = 'Inbox', options) => {
     try {
@@ -58,9 +73,17 @@ program
     }
   });
 
-program
+listCommand.addHelpText('after', `
+Examples:
+  things list                    # List from Inbox
+  things list Today              # List from Today
+  things list "My Project"       # List from project
+  things list Today --ids        # Show IDs for completion
+  things list A1B2C3D4E5F6G7H8   # List by project/area ID`);
+
+const listJsonCommand = program
   .command('list-json [container]')
-  .description('List to-dos as JSON with full metadata\n\nExamples:\n  things list-json Today                           # JSON output\n  things list-json Inbox | jq \'.[] | .name\'        # Extract names\n  things list-json Today | jq \'length\'             # Count items\n  things list-json Today | jq \'.[] | select(.status == "open")\'')
+  .description('List to-dos as JSON with full metadata')
   .action(async (container = 'Inbox') => {
     try {
       const todos = await listTodosJson(container);
@@ -70,10 +93,17 @@ program
     }
   });
 
-program
+listJsonCommand.addHelpText('after', `
+Examples:
+  things list-json Today                           # JSON output
+  things list-json Inbox | jq '.[] | .name'        # Extract names
+  things list-json Today | jq 'length'             # Count items
+  things list-json Today | jq '.[] | select(.status == "open")'`);
+
+const completeCommand = program
   .command('complete <id>')
   .usage('<id>')
-  .description('Mark a to-do as complete by ID\n\nExamples:\n  things list Today --ids                    # Get IDs\n  things complete "A1B2C3D4E5F6G7H8I9J0K1L2"  # Complete by ID')
+  .description('Mark a to-do as complete by ID')
   .action(async (id) => {
     try {
       const todoName = await completeTodoById(id);
@@ -83,10 +113,15 @@ program
     }
   });
 
-program
+completeCommand.addHelpText('after', `
+Examples:
+  things list Today --ids                    # Get IDs
+  things complete "A1B2C3D4E5F6G7H8I9J0K1L2"  # Complete by ID`);
+
+const updateCommand = program
   .command('update <id>')
   .usage('<id> [options]')
-  .description('Update an existing to-do by ID\n\nExamples:\n  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --title "New title"\n  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --notes "Updated" --tags "Work,Urgent"\n  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --project-id "M3N4O5P6Q7R8S9T0U1V2W3X4"\n  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --no-project --area "Personal"')
+  .description('Update an existing to-do by ID')
   .option('-t, --title <title>', 'Update the title')
   .option('-n, --notes <notes>', 'Update the notes')
   .option('--tags <tags>', 'Update tags (comma-separated)')
@@ -106,136 +141,196 @@ program
     }
   });
 
+updateCommand.addHelpText('after', `
+Examples:
+  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --title "New title"
+  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --notes "Updated" --tags "Work,Urgent"
+  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --project-id "M3N4O5P6Q7R8S9T0U1V2W3X4"
+  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --no-project --area "Personal"`);
+
 // Project commands
-program
+const projectCommand = program
   .command('project')
-  .description('Project management commands\n\nExamples:\n  things project add "Website Redesign"\n  things project add "Mobile App" --area "Work"\n  things project list\n  things project list --ids')
-  .addCommand(
-    new Command('add')
-      .argument('<name>', 'Project name')
-      .usage('<name> [options]')
-      .description('Add a new project\n\nExamples:\n  things project add "Website Redesign"\n  things project add "Home Renovation" --notes "Kitchen and bathroom" --area "Home"')
-      .option('-n, --notes <notes>', 'Add notes to the project')
-      .option('-a, --area <area>', 'Add to specific area')
-      .action(async (name, options) => {
-        try {
-          await addProject(name, options);
-          console.log(chalk.green(`✓ Added project: ${name}`));
-        } catch (error) {
-          console.error(chalk.red(`Error: ${error.message}`));
-        }
-      })
-  )
-  .addCommand(
-    new Command('list')
-      .description('List all projects\n\nExamples:\n  things project list        # List project names\n  things project list --ids  # List with IDs for reference')
-      .option('--ids', 'Show IDs for each project')
-      .action(async (options) => {
-        try {
-          const projects = await listProjects(options.ids);
-          if (projects.length === 0) {
-            console.log(chalk.yellow('No projects found'));
+  .description('Project management commands');
+
+const projectAddCommand = new Command('add')
+  .argument('<name>', 'Project name')
+  .usage('<name> [options]')
+  .description('Add a new project')
+  .option('-n, --notes <notes>', 'Add notes to the project')
+  .option('-a, --area <area>', 'Add to specific area')
+  .showHelpAfterError()
+  .action(async (name, options) => {
+    try {
+      await addProject(name, options);
+      console.log(chalk.green(`✓ Added project: ${name}`));
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  });
+
+projectAddCommand.addHelpText('after', `
+Examples:
+  things project add "Website Redesign"
+  things project add "Home Renovation" --notes "Kitchen and bathroom" --area "Home"`);
+
+const projectListCommand = new Command('list')
+  .description('List all projects')
+  .option('--ids', 'Show IDs for each project')
+  .action(async (options) => {
+    try {
+      const projects = await listProjects(options.ids);
+      if (projects.length === 0) {
+        console.log(chalk.yellow('No projects found'));
+      } else {
+        console.log(chalk.blue(`\nProjects (${projects.length}):`));
+        projects.forEach((project, index) => {
+          if (options.ids) {
+            console.log(`${index + 1}. ${project.name} ${chalk.gray(`[${project.id}]`)}`);
           } else {
-            console.log(chalk.blue(`\nProjects (${projects.length}):`));
-            projects.forEach((project, index) => {
-              if (options.ids) {
-                console.log(`${index + 1}. ${project.name} ${chalk.gray(`[${project.id}]`)}`);
-              } else {
-                console.log(`${index + 1}. ${project}`);
-              }
-            });
+            console.log(`${index + 1}. ${project}`);
           }
-        } catch (error) {
-          console.error(chalk.red(`Error: ${error.message}`));
-        }
-      })
-  );
+        });
+      }
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  });
+
+projectListCommand.addHelpText('after', `
+Examples:
+  things project list        # List project names
+  things project list --ids  # List with IDs for reference`);
+
+projectCommand.addCommand(projectAddCommand);
+projectCommand.addCommand(projectListCommand);
+
+projectCommand.addHelpText('after', `
+Examples:
+  things project add "Website Redesign"
+  things project add "Mobile App" --area "Work"
+  things project list
+  things project list --ids`);
 
 // Area commands
-program
+const areaCommand = program
   .command('area')
-  .description('Area management commands\n\nExamples:\n  things area add "Health & Fitness"\n  things area list\n  things area list --ids')
-  .addCommand(
-    new Command('add')
-      .argument('<name>', 'Area name')
-      .usage('<name>')
-      .description('Add a new area\n\nExamples:\n  things area add "Health & Fitness"\n  things area add "Work Projects"')
-      .action(async (name) => {
-        try {
-          await addArea(name);
-          console.log(chalk.green(`✓ Added area: ${name}`));
-        } catch (error) {
-          console.error(chalk.red(`Error: ${error.message}`));
-        }
-      })
-  )
-  .addCommand(
-    new Command('list')
-      .description('List all areas\n\nExamples:\n  things area list        # List area names\n  things area list --ids  # List with IDs for reference')
-      .option('--ids', 'Show IDs for each area')
-      .action(async (options) => {
-        try {
-          const areas = await listAreas(options.ids);
-          if (areas.length === 0) {
-            console.log(chalk.yellow('No areas found'));
+  .description('Area management commands');
+
+const areaAddCommand = new Command('add')
+  .argument('<name>', 'Area name')
+  .usage('<name>')
+  .description('Add a new area')
+  .showHelpAfterError()
+  .action(async (name) => {
+    try {
+      await addArea(name);
+      console.log(chalk.green(`✓ Added area: ${name}`));
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  });
+
+areaAddCommand.addHelpText('after', `
+Examples:
+  things area add "Health & Fitness"
+  things area add "Work Projects"`);
+
+const areaListCommand = new Command('list')
+  .description('List all areas')
+  .option('--ids', 'Show IDs for each area')
+  .action(async (options) => {
+    try {
+      const areas = await listAreas(options.ids);
+      if (areas.length === 0) {
+        console.log(chalk.yellow('No areas found'));
+      } else {
+        console.log(chalk.blue(`\nAreas (${areas.length}):`));
+        areas.forEach((area, index) => {
+          if (options.ids) {
+            console.log(`${index + 1}. ${area.name} ${chalk.gray(`[${area.id}]`)}`);
           } else {
-            console.log(chalk.blue(`\nAreas (${areas.length}):`));
-            areas.forEach((area, index) => {
-              if (options.ids) {
-                console.log(`${index + 1}. ${area.name} ${chalk.gray(`[${area.id}]`)}`);
-              } else {
-                console.log(`${index + 1}. ${area}`);
-              }
-            });
+            console.log(`${index + 1}. ${area}`);
           }
-        } catch (error) {
-          console.error(chalk.red(`Error: ${error.message}`));
-        }
-      })
-  );
+        });
+      }
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  });
+
+areaListCommand.addHelpText('after', `
+Examples:
+  things area list        # List area names
+  things area list --ids  # List with IDs for reference`);
+
+areaCommand.addCommand(areaAddCommand);
+areaCommand.addCommand(areaListCommand);
+
+areaCommand.addHelpText('after', `
+Examples:
+  things area add "Health & Fitness"
+  things area list
+  things area list --ids`);
 
 // Tag commands
-program
+const tagCommand = program
   .command('tag')
-  .description('Tag management commands\n\nExamples:\n  things tag add "Urgent"\n  things tag list')
-  .addCommand(
-    new Command('list')
-      .description('List all tags\n\nExamples:\n  things tag list  # Show all available tags')
-      .action(async () => {
-        try {
-          const tags = await listTags();
-          if (tags.length === 0) {
-            console.log(chalk.yellow('No tags found'));
-          } else {
-            console.log(chalk.blue(`\nTags (${tags.length}):`));
-            tags.forEach((tag, index) => {
-              console.log(`${index + 1}. ${tag}`);
-            });
-          }
-        } catch (error) {
-          console.error(chalk.red(`Error: ${error.message}`));
-        }
-      })
-  )
-  .addCommand(
-    new Command('add')
-      .argument('<name>', 'Tag name')
-      .usage('<name>')
-      .description('Add a new tag\n\nExamples:\n  things tag add "Urgent"\n  things tag add "Work Projects"')
-      .action(async (name) => {
-        try {
-          await addTag(name);
-          console.log(chalk.green(`✓ Added tag: ${name}`));
-        } catch (error) {
-          console.error(chalk.red(`Error: ${error.message}`));
-        }
-      })
-  );
+  .description('Tag management commands');
+
+const tagListCommand = new Command('list')
+  .description('List all tags')
+  .action(async () => {
+    try {
+      const tags = await listTags();
+      if (tags.length === 0) {
+        console.log(chalk.yellow('No tags found'));
+      } else {
+        console.log(chalk.blue(`\nTags (${tags.length}):`));
+        tags.forEach((tag, index) => {
+          console.log(`${index + 1}. ${tag}`);
+        });
+      }
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  });
+
+tagListCommand.addHelpText('after', `
+Examples:
+  things tag list  # Show all available tags`);
+
+const tagAddCommand = new Command('add')
+  .argument('<name>', 'Tag name')
+  .usage('<name>')
+  .description('Add a new tag')
+  .showHelpAfterError()
+  .action(async (name) => {
+    try {
+      await addTag(name);
+      console.log(chalk.green(`✓ Added tag: ${name}`));
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+    }
+  });
+
+tagAddCommand.addHelpText('after', `
+Examples:
+  things tag add "Urgent"
+  things tag add "Work Projects"`);
+
+tagCommand.addCommand(tagListCommand);
+tagCommand.addCommand(tagAddCommand);
+
+tagCommand.addHelpText('after', `
+Examples:
+  things tag add "Urgent"
+  things tag list`);
 
 // Quick entry
-program
+const quickCommand = program
   .command('quick')
-  .description('Open Things Quick Entry panel\n\nExamples:\n  things quick                                    # Empty panel\n  things quick --title "New idea" --notes "Details here"')
+  .description('Open Things Quick Entry panel')
   .option('-t, --title <title>', 'Pre-fill title')
   .option('-n, --notes <notes>', 'Pre-fill notes')
   .action(async (options) => {
@@ -246,6 +341,11 @@ program
       console.error(chalk.red(`Error: ${error.message}`));
     }
   });
+
+quickCommand.addHelpText('after', `
+Examples:
+  things quick                                    # Empty panel
+  things quick --title "New idea" --notes "Details here"`);
 
 // Helper functions
 function parseAppleScriptDate(dateStr) {
