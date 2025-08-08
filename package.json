@@ -9,7 +9,10 @@
     "things": "index.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "bump": "npm version patch && npm install && git add package-lock.json && git commit --amend --no-edit",
+    "bump:minor": "npm version minor && npm install && git add package-lock.json && git commit --amend --no-edit",
+    "bump:major": "npm version major && npm install && git add package-lock.json && git commit --amend --no-edit"
   },
   "keywords": [
     "things",
