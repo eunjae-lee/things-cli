@@ -1,6 +1,6 @@
 {
   "name": "@eunjae/things-cli",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Command-line interface for Things 3 task management app",
   "main": "index.js",
   "type": "module",
