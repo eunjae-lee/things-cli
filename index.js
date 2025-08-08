@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { executeAppleScript } from './lib/applescript.js';
+import { validateDateString, generateAppleScriptDate, parseAppleScriptDate, convertTodoDateFields } from './lib/date-utils.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -348,40 +349,6 @@ Examples:
   things quick --title "New idea" --notes "Details here"`);
 
 // Helper functions
-function parseAppleScriptDate(dateStr) {
-  if (!dateStr || dateStr === "missing value") return null;
-  
-  try {
-    // AppleScript format: "Wednesday 6 August 2025 at 20:45:46"
-    // Remove day of week and "at"
-    const cleanStr = dateStr.replace(/^[A-Za-z]+ /, '').replace(' at ', ' ');
-    
-    // Parse with JavaScript Date constructor
-    const date = new Date(cleanStr);
-    
-    if (!isNaN(date.getTime())) {
-      return date;
-    }
-    
-    // If that fails, try manual parsing
-    const match = dateStr.match(/(\d{1,2}) ([A-Za-z]+) (\d{4}) at (\d{1,2}):(\d{2}):(\d{2})/);
-    if (match) {
-      const [, day, month, year, hour, minute, second] = match;
-      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                         'July', 'August', 'September', 'October', 'November', 'December'];
-      const monthIndex = monthNames.indexOf(month);
-      
-      if (monthIndex !== -1) {
-        return new Date(parseInt(year), monthIndex, parseInt(day), 
-                       parseInt(hour), parseInt(minute), parseInt(second));
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    return null;
-  }
-}
 
 // Implementation functions
 async function addTodo(title, options) {
@@ -391,15 +358,9 @@ async function addTodo(title, options) {
   }
 
   // Validate date format if provided
+  let dueDate = null;
   if (options.due) {
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(options.due)) {
-      throw new Error('Due date must be in YYYY-MM-DD format');
-    }
-    const dueDate = new Date(options.due);
-    if (isNaN(dueDate.getTime())) {
-      throw new Error('Invalid due date provided');
-    }
+    dueDate = validateDateString(options.due);
   }
 
   // Validate list name if provided
@@ -416,10 +377,7 @@ async function addTodo(title, options) {
     properties.push(`notes:"${options.notes.replace(/"/g, '\\"')}"`);
   }
   
-  if (options.due) {
-    const dueDate = new Date(options.due);
-    properties.push(`due date:date "${dueDate.toDateString()}"`);
-  }
+  // Note: Due date will be set after creating the todo to avoid AppleScript locale issues
   
   if (options.tags) {
     properties.push(`tag names:"${options.tags.replace(/"/g, '\\"')}"`);
@@ -439,7 +397,15 @@ async function addTodo(title, options) {
     script += ` at beginning of area "${options.area.replace(/"/g, '\\"')}"`;
   }
   
-  script += `\nend tell`;
+  script += `\n`;
+  
+  // Set due date after creating the todo to avoid locale issues
+  if (options.due) {
+    script += `  ${generateAppleScriptDate(dueDate, 'tempDate')}\n`;
+    script += `  set due date of newToDo to tempDate\n`;
+  }
+  
+  script += `end tell`;
   
   return executeAppleScript(script);
 }
@@ -564,32 +530,7 @@ async function listTodosJson(container) {
   
   // Clean up the result to handle AppleScript's "missing value" and "null" strings
   const cleanedResult = Array.isArray(result) ? result.map(todo => {
-    const cleaned = { ...todo };
-    
-    // Convert "missing value" and "null" strings to actual null
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === "missing value" || cleaned[key] === "null") {
-        cleaned[key] = null;
-      }
-    });
-    
-    // Convert AppleScript dates to ISO strings
-    const dateFields = ['creationDate', 'modificationDate', 'dueDate', 'activationDate', 'completionDate', 'cancellationDate'];
-    dateFields.forEach(field => {
-      if (cleaned[field] && cleaned[field] !== null) {
-        try {
-          // Parse AppleScript date format: "Wednesday 6 August 2025 at 20:45:46"
-          const dateStr = cleaned[field];
-          const parsedDate = parseAppleScriptDate(dateStr);
-          if (parsedDate) {
-            cleaned[field] = parsedDate.toISOString();
-          }
-        } catch (error) {
-          // If parsing fails, keep the original value
-          console.error(`Failed to parse date ${field}: ${cleaned[field]}`);
-        }
-      }
-    });
+    const cleaned = convertTodoDateFields(todo);
     
     // Parse tag names into array if present
     if (cleaned.tagNames && cleaned.tagNames !== "") {
@@ -626,15 +567,9 @@ async function updateTodo(id, options) {
   }
 
   // Validate date format if provided
+  let dueDate = null;
   if (options.due) {
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dateRegex.test(options.due)) {
-      throw new Error('Due date must be in YYYY-MM-DD format');
-    }
-    const dueDate = new Date(options.due);
-    if (isNaN(dueDate.getTime())) {
-      throw new Error('Invalid due date provided');
-    }
+    dueDate = validateDateString(options.due);
   }
 
   let script = `tell application "Things3"\n`;
@@ -656,9 +591,8 @@ async function updateTodo(id, options) {
   }
 
   if (options.due) {
-    // For now, skip due date updates due to AppleScript date parsing complexity
-    // This can be implemented later with a more robust date handling approach
-    console.log(chalk.yellow('Note: Due date updates are not yet supported'));
+    script += `  ${generateAppleScriptDate(dueDate, 'tempDate')}\n`;
+    script += `  set due date of aTodo to tempDate\n`;
   }
 
   // Handle project/area changes
