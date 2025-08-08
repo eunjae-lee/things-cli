@@ -2,8 +2,9 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { executeAppleScript } from './lib/applescript.js';
-import { validateDateString, generateAppleScriptDate, parseAppleScriptDate, convertTodoDateFields } from './lib/date-utils.js';
+import { executeAppleScript, executeThingsUrlScheme } from './lib/applescript.js';
+import { validateDateString, validateWhenString, generateAppleScriptDate, parseAppleScriptDate, convertTodoDateFields, formatDateForUrlScheme } from './lib/date-utils.js';
+import { getAuthToken, setAuthToken, getConfigPath } from './lib/config.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -27,6 +28,7 @@ const addCommand = program
   .description('Add a new to-do')
   .option('-n, --notes <notes>', 'Add notes to the to-do')
   .option('-d, --due <date>', 'Set due date (YYYY-MM-DD)')
+  .option('-w, --when <date>', 'Set when date (today, tomorrow, anytime, someday, or YYYY-MM-DD)')
   .option('-t, --tags <tags>', 'Add tags (comma-separated)')
   .option('-l, --list <list>', 'Add to specific list (Inbox, Today, Anytime, Someday)')
   .option('-p, --project <project>', 'Add to specific project (by name)')
@@ -45,9 +47,9 @@ const addCommand = program
 addCommand.addHelpText('after', `
 Examples:
   things add "Buy groceries"
-  things add "Call dentist" --notes "Schedule cleaning" --due 2024-01-15
+  things add "Call dentist" --notes "Schedule cleaning" --due 2024-01-15 --when today
   things add "Review code" --list Today --tags "Work,Urgent"
-  things add "Book flights" --project-id "A1B2C3D4E5F6G7H8I9J0K1L2"`);
+  things add "Book flights" --project-id "A1B2C3D4E5F6G7H8I9J0K1L2" --when anytime`);
 
 const listCommand = program
   .command('list [container]')
@@ -127,6 +129,7 @@ const updateCommand = program
   .option('-n, --notes <notes>', 'Update the notes')
   .option('--tags <tags>', 'Update tags (comma-separated)')
   .option('-d, --due <date>', 'Update due date (YYYY-MM-DD)')
+  .option('-w, --when <date>', 'Update when date (today, tomorrow, anytime, someday, or YYYY-MM-DD)')
   .option('--project <project>', 'Move to project (by name)')
   .option('--project-id <id>', 'Move to project (by ID)')
   .option('--area <area>', 'Move to area (by name)')
@@ -146,8 +149,9 @@ updateCommand.addHelpText('after', `
 Examples:
   things update "A1B2C3D4E5F6G7H8I9J0K1L2" --title "New title"
   things update "A1B2C3D4E5F6G7H8I9J0K1L2" --notes "Updated" --tags "Work,Urgent"
+  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --due 2024-01-15 --when today
   things update "A1B2C3D4E5F6G7H8I9J0K1L2" --project-id "M3N4O5P6Q7R8S9T0U1V2W3X4"
-  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --no-project --area "Personal"`);
+  things update "A1B2C3D4E5F6G7H8I9J0K1L2" --no-project --area "Personal" --when someday`);
 
 // Project commands
 const projectCommand = program
@@ -362,6 +366,11 @@ async function addTodo(title, options) {
   if (options.due) {
     dueDate = validateDateString(options.due);
   }
+  
+  let whenInfo = null;
+  if (options.when) {
+    whenInfo = validateWhenString(options.when);
+  }
 
   // Validate list name if provided
   const validLists = ['Inbox', 'Today', 'Anytime', 'Someday', 'Upcoming'];
@@ -405,9 +414,65 @@ async function addTodo(title, options) {
     script += `  set due date of newToDo to tempDate\n`;
   }
   
+  // Handle when dates - we'll process URL scheme dates after the main AppleScript
+  let whenUrlSchemeNeeded = false;
+  if (options.when) {
+    if (whenInfo.type === 'special') {
+      // Handle special values by moving to appropriate list
+      const listMap = {
+        'today': 'Today',
+        'anytime': 'Anytime', 
+        'someday': 'Someday'
+      };
+      if (listMap[whenInfo.value]) {
+        script += `  move newToDo to list "${listMap[whenInfo.value]}"\n`;
+      } else if (whenInfo.value === 'tomorrow') {
+        // For tomorrow, we'll use URL scheme
+        whenUrlSchemeNeeded = true;
+      }
+    } else {
+      // For specific dates, we'll use URL scheme
+      whenUrlSchemeNeeded = true;
+    }
+  }
+  
+  // Return the ID of the created todo if we need it for URL scheme
+  if (whenUrlSchemeNeeded) {
+    script += `  return id of newToDo\n`;
+  }
+  
   script += `end tell`;
   
-  return executeAppleScript(script);
+  const result = await executeAppleScript(script);
+  
+  // Handle when dates that require URL scheme
+  if (whenUrlSchemeNeeded && options.when) {
+    let whenValue;
+    if (whenInfo.type === 'special' && whenInfo.value === 'tomorrow') {
+      whenValue = 'tomorrow';
+    } else if (whenInfo.type === 'date') {
+      whenValue = formatDateForUrlScheme(whenInfo.value);
+    }
+    
+    if (whenValue && result) {
+      const authToken = getAuthToken();
+      if (!authToken) {
+        console.log(chalk.yellow('Warning: Auth token required for when dates. Configure it with:'));
+        console.log(chalk.gray('  things config set auth-token <your-token>'));
+        console.log(chalk.gray('Get your token from Things 3 → Settings → General → Things URLs → Manage'));
+      } else {
+        try {
+          const todoId = result; // The AppleScript returns the ID
+          const urlSchemeUrl = `things:///update?auth-token=${encodeURIComponent(authToken)}&id=${encodeURIComponent(todoId)}&when=${encodeURIComponent(whenValue)}`;
+          await executeThingsUrlScheme(urlSchemeUrl);
+        } catch (error) {
+          console.log(chalk.red(`Warning: Could not set when date: ${error.message}`));
+        }
+      }
+    }
+  }
+  
+  return result;
 }
 
 async function listTodos(container, includeIds = false) {
@@ -571,6 +636,11 @@ async function updateTodo(id, options) {
   if (options.due) {
     dueDate = validateDateString(options.due);
   }
+  
+  let whenInfo = null;
+  if (options.when) {
+    whenInfo = validateWhenString(options.when);
+  }
 
   let script = `tell application "Things3"\n`;
   script += `  set aTodo to to do id "${id.replace(/"/g, '\\"')}"\n`;
@@ -595,6 +665,28 @@ async function updateTodo(id, options) {
     script += `  set due date of aTodo to tempDate\n`;
   }
 
+  // Handle when dates - we'll process this after the main AppleScript
+  let whenUrlSchemeNeeded = false;
+  if (options.when) {
+    if (whenInfo.type === 'special') {
+      // Handle special values by moving to appropriate list
+      const listMap = {
+        'today': 'Today',
+        'anytime': 'Anytime', 
+        'someday': 'Someday'
+      };
+      if (listMap[whenInfo.value]) {
+        script += `  move aTodo to list "${listMap[whenInfo.value]}"\n`;
+      } else if (whenInfo.value === 'tomorrow') {
+        // For tomorrow, we'll use URL scheme
+        whenUrlSchemeNeeded = true;
+      }
+    } else {
+      // For specific dates, we'll use URL scheme
+      whenUrlSchemeNeeded = true;
+    }
+  }
+
   // Handle project/area changes
   if (options.noProject) {
     script += `  delete project of aTodo\n`;
@@ -615,7 +707,35 @@ async function updateTodo(id, options) {
   script += `  return todoName\n`;
   script += `end tell`;
 
-  return executeAppleScript(script);
+  const result = await executeAppleScript(script);
+  
+  // Handle when dates that require URL scheme
+  if (whenUrlSchemeNeeded && options.when) {
+    let whenValue;
+    if (whenInfo.type === 'special' && whenInfo.value === 'tomorrow') {
+      whenValue = 'tomorrow';
+    } else if (whenInfo.type === 'date') {
+      whenValue = formatDateForUrlScheme(whenInfo.value);
+    }
+    
+    if (whenValue) {
+      const authToken = getAuthToken();
+      if (!authToken) {
+        console.log(chalk.yellow('Warning: Auth token required for when dates. Configure it with:'));
+        console.log(chalk.gray('  things config set auth-token <your-token>'));
+        console.log(chalk.gray('Get your token from Things 3 → Settings → General → Things URLs → Manage'));
+      } else {
+        try {
+          const urlSchemeUrl = `things:///update?auth-token=${encodeURIComponent(authToken)}&id=${encodeURIComponent(id)}&when=${encodeURIComponent(whenValue)}`;
+          await executeThingsUrlScheme(urlSchemeUrl);
+        } catch (error) {
+          console.log(chalk.red(`Warning: Could not set when date: ${error.message}`));
+        }
+      }
+    }
+  }
+  
+  return result;
 }
 
 async function addProject(name, options) {
@@ -754,5 +874,76 @@ async function showQuickEntry(options) {
   
   return executeAppleScript(script);
 }
+
+// Config command
+const configCommand = program
+  .command('config')
+  .description('Manage configuration settings');
+
+const configSetCommand = new Command('set')
+  .argument('<key>', 'Configuration key (auth-token)')
+  .argument('<value>', 'Configuration value')
+  .description('Set a configuration value')
+  .action(async (key, value) => {
+    try {
+      if (key === 'auth-token') {
+        setAuthToken(value);
+        console.log(chalk.green('✓ Auth token saved successfully'));
+        console.log(chalk.gray(`Config stored in: ${getConfigPath()}`));
+      } else {
+        console.error(chalk.red(`Error: Unknown configuration key "${key}"`));
+        console.log('Available keys: auth-token');
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+const configGetCommand = new Command('get')
+  .argument('[key]', 'Configuration key to get (optional)')
+  .description('Get configuration value(s)')
+  .action(async (key) => {
+    try {
+      if (key === 'auth-token') {
+        const token = getAuthToken();
+        if (token) {
+          console.log(chalk.green('Auth token is configured'));
+          console.log(chalk.gray(`Token: ${token.substring(0, 8)}...${token.substring(token.length - 8)}`));
+        } else {
+          console.log(chalk.yellow('Auth token is not configured'));
+          console.log('Set it with: things config set auth-token <your-token>');
+        }
+      } else if (!key) {
+        // Show all config
+        const token = getAuthToken();
+        console.log(chalk.blue('Configuration:'));
+        console.log(`  auth-token: ${token ? chalk.green('configured') : chalk.yellow('not set')}`);
+        console.log(chalk.gray(`\nConfig file: ${getConfigPath()}`));
+      } else {
+        console.error(chalk.red(`Error: Unknown configuration key "${key}"`));
+        console.log('Available keys: auth-token');
+        process.exit(1);
+      }
+    } catch (error) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+configCommand.addCommand(configSetCommand);
+configCommand.addCommand(configGetCommand);
+
+configCommand.addHelpText('after', `
+Examples:
+  things config set auth-token "your-auth-token-here"
+  things config get auth-token
+  things config get
+
+To get your auth token:
+  1. Open Things 3
+  2. Go to Settings → General → Things URLs
+  3. Click "Manage" and copy your token`);
 
 program.parse();
